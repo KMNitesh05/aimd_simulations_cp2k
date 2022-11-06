@@ -1,0 +1,229 @@
+@SET BASE_NAME wat_vap
+@SET ID 1
+@SET XYZ_FILE_NAME wat_vap.xyz
+@SET BOX_LENGTH_X 18.0 
+@SET BOX_LENGTH_Y 18.0
+@SET BOX_LENGTH_Z 50.0
+@SET F_METHOD QS
+@SET ENSEMBLE_TYPE NVT
+@SET SYS_CHARGE 0
+@SET RUN_MODE MD
+@SET RESTART_MODE F
+&GLOBAL
+    PROJECT wat_vap
+    PREFERRED_FFT_LIBRARY FFTW
+    RUN_TYPE ${RUN_MODE}
+    PRINT_LEVEL MEDIUM
+    WALLTIME 47:50:00 
+&END GLOBAL
+
+@IF ${RESTART_MODE} == T
+&EXT_RESTART
+    RESTART_FILE_NAME wat_vap.r
+    RESTART_DEFAULT T
+&END EXT_RESTART
+@ENDIF
+
+&FORCE_EVAL
+    METHOD ${F_METHOD}
+    STRESS_TENSOR ANALYTICAL
+
+@IF ${F_METHOD} == QS
+    &DFT
+        LSD
+        PLUS_U_METHOD = Mulliken
+        CHARGE  ${SYS_CHARGE}
+        BASIS_SET_FILE_NAME BASIS_MOLOPT
+        POTENTIAL_FILE_NAME POTENTIAL
+        &MGRID
+            NGRIDS 5
+            CUTOFF 500
+            REL_CUTOFF 60
+            PROGRESSION_FACTOR 3
+        &END MGRID
+        &QS
+          EPS_DEFAULT 1.0E-5
+          WF_INTERPOLATION ASPC
+          METHOD GPW
+        &END QS
+        &SCF
+            SCF_GUESS ATOMIC
+            MAX_SCF 50
+            EPS_SCF 1.0E-5
+            &OT
+                MINIMIZER DIIS
+                PRECONDITIONER FULL_ALL
+            &END OT
+            &OUTER_SCF
+                MAX_SCF 100
+                EPS_SCF 1.0E-5
+            &END OUTER_SCF
+            &PRINT
+                &RESTART OFF
+                    ADD_LAST NUMERIC
+                    &EACH
+                        QS_SCF 0
+                    &END EACH
+                &END RESTART
+            &END PRINT
+        &END SCF
+     &XC
+      &XC_FUNCTIONAL
+        &PBE
+          PARAMETRIZATION REVPBE
+        &END PBE
+      &END XC_FUNCTIONAL
+      &vdW_POTENTIAL
+        DISPERSION_FUNCTIONAL PAIR_POTENTIAL
+        &PAIR_POTENTIAL
+           TYPE DFTD3
+           CALCULATE_C9_TERM .FALSE.
+           REFERENCE_C9_TERM .FALSE.
+           PARAMETER_FILE_NAME dftd3.dat
+           REFERENCE_FUNCTIONAL revPBE
+        &END PAIR_POTENTIAL
+      &END vdW_POTENTIAL
+     &END XC
+    &END DFT
+@ENDIF
+
+    
+@ENDIF 
+    &SUBSYS
+        &CELL
+            ABC [angstrom] ${BOX_LENGTH_X} ${BOX_LENGTH_Y} ${BOX_LENGTH_Z} 
+            ALPHA_BETA_GAMMA 90.0 90.0 90.0
+            PERIODIC XY 
+        &END CELL
+        &TOPOLOGY
+            COORD_FILE_NAME ./${XYZ_FILE_NAME}
+            COORD_FILE_FORMAT XYZ
+            &GENERATE
+              CREATE_MOLECULES TRUE
+	      &NEIGHBOR_LISTS
+	        GEO_CHECK TRUE
+	      &END NEIGHBOR_LISTS
+	    &END GENERATE
+        &END TOPOLOGY
+        &KIND H
+	    ELEMENT H
+            BASIS_SET DZVP-MOLOPT-SR-GTH-q1
+            POTENTIAL GTH-BP-q1
+        &END KIND
+        &KIND O
+	    ELEMENT O
+            BASIS_SET DZVP-MOLOPT-SR-GTH-q6
+            POTENTIAL GTH-BP-q6
+        &END KIND                 
+    &END SUBSYS
+&END FORCE_EVAL
+
+&MOTION
+@IF ${RUN_MODE} == MD
+    &MD
+        ENSEMBLE ${ENSEMBLE_TYPE}
+        STEPS 20000
+        TIMESTEP 0.5
+        TEMPERATURE 300
+        &THERMOSTAT
+            TYPE CSVR
+            &CSVR
+                TIMECON 20 
+                #small suitable for equilibration
+            &END CSVR
+        &END THERMOSTAT
+        &BAROSTAT
+          PRESSURE 1
+          TIMECON 100
+        &END BAROSTAT
+       
+    &END MD
+@ENDIF
+
+@IF ${RUN_MODE} == CELL_OPT
+    &CELL_OPT
+        OPTIMIZER CG
+        TYPE GEO_OPT
+        KEEP_SYMMETRY T
+    &PRINT       !PRINTING COMMANDS
+      &CELL
+        FILENAME CELL
+        &EACH
+            CELL_OPT 50
+        &END EACH
+      &END CELL
+    &END PRINT
+     
+    &END CELL_OPT
+    &GEO_OPT
+        TYPE MINIMIZATION    
+        MAX_DR    1.0E-03
+        MAX_FORCE 1.0E-03
+        RMS_DR    1.0E-03
+        RMS_FORCE 1.0E-03
+        MAX_ITER 200
+        OPTIMIZER CG
+        &CG
+            MAX_STEEP_STEPS  100
+            RESTART_LIMIT 9.0E-01
+        &END CG
+    &END GEO_OPT
+@ENDIF 
+    &PRINT       !PRINTING COMMANDS
+      &STRESS
+       FILENAME STRESS
+        &EACH
+        MD 1000
+        CELL_OPT 5
+        GEO_OPT 5
+        &END EACH
+      &END STRESS
+      &CELL
+        FILENAME CELL
+        &EACH
+            MD 1
+            CELL_OPT 1
+            GEO_OPT 1
+        &END EACH
+      &END CELL
+      &TRAJECTORY 
+          &EACH
+              MD 1
+              CELL_OPT 1
+              GEO_OPT 1
+          &END EACH
+          FORMAT XYZ
+          LOG_PRINT_KEY T
+          ADD_LAST NUMERIC
+          FILENAME =${BASE_NAME}-${ID}-${RUN_MODE}.xyz
+      &END TRAJECTORY
+      &VELOCITIES
+          &EACH
+              MD 500
+              CELL_OPT 100
+              GEO_OPT 100
+          &END EACH
+          FILENAME =${BASE_NAME}-${ID}-${RUN_MODE}-vel.xyz
+      &END VELOCITIES
+      &RESTART_HISTORY
+          ADD_LAST NUMERIC
+          FILENAME ${BASE_NAME}.restart
+          &EACH
+              MD 200
+              CELL_OPT 5
+              GEO_OPT 5
+          &END EACH
+      &END RESTART_HISTORY
+      &RESTART 
+          ADD_LAST NUMERIC
+          BACKUP_COPIES 2
+          &EACH
+              MD 1
+              CELL_OPT 1
+              GEO_OPT 1
+          &END EACH
+          LOG_PRINT_KEY T
+          FILENAME =${BASE_NAME}.r
+      &END RESTART
+    &END PRINT 
+&END MOTION
